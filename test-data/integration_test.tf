@@ -1,16 +1,3 @@
-terraform {
-  required_providers {
-    snowflake = {
-      source  = "Snowflake-Labs/snowflake"
-      version = "~> 0.84"
-    }
-  }
-}
-
-provider "snowflake" {
-  # Configuration will be provided via environment variables or terraform.tfvars
-  # SNOWFLAKE_USER, SNOWFLAKE_PASSWORD, SNOWFLAKE_ACCOUNT, etc.
-}
 resource "snowflake_table" "table_users" {
   name     = "users"
 
