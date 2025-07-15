@@ -16,5 +16,5 @@ vsc-extension-quickstart.md
 test-data/**
 docs/**
 examples/**
-# Exclude old packages
-sf2tf-*.vsix
+# Exclude releases folder
+releases/**

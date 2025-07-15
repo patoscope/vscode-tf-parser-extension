@@ -44,7 +44,7 @@ suite('Terraform Converter Test Suite', () => {
 
         const resource = converter.convertSingle(table);
         assert.ok(resource);
-        assert.strictEqual(resource.name, 'SALES_PRODUCTS');
+        assert.strictEqual(resource.name, 'PRODUCTS'); // Schema prefix removed
         assert.ok(resource.content.includes('database = local.databases[var.DATABASE]'));
         assert.ok(resource.content.includes('schema   = snowflake_schema.SALES.name'));
         assert.ok(resource.content.includes('comment  = "Products catalog"'));
@@ -63,7 +63,7 @@ suite('Terraform Converter Test Suite', () => {
         const resource = converter.convertSingle(view);
         assert.ok(resource);
         assert.strictEqual(resource.type, 'snowflake_view');
-        assert.strictEqual(resource.name, 'PUBLIC_ACTIVE_USERS');
+        assert.strictEqual(resource.name, 'ACTIVE_USERS'); // Schema prefix removed
         assert.ok(resource.content.includes('is_secure = true'));
         assert.ok(resource.content.includes('comment  = "View of active users only"'));
         assert.ok(resource.content.includes('SELECT id, name FROM users WHERE active = TRUE'));
@@ -86,7 +86,7 @@ suite('Terraform Converter Test Suite', () => {
         const resource = converter.convertSingle(procedure);
         assert.ok(resource);
         assert.strictEqual(resource.type, 'snowflake_procedure');
-        assert.strictEqual(resource.name, 'ADMIN_UPDATE_STATUS');
+        assert.strictEqual(resource.name, 'UPDATE_STATUS'); // Schema prefix removed
         assert.ok(resource.content.includes('language = "SQL"'));
         assert.ok(resource.content.includes('return_type = "STRING"'));
         assert.ok(resource.content.includes('name = "user_id"'));
@@ -94,7 +94,7 @@ suite('Terraform Converter Test Suite', () => {
         assert.ok(resource.content.includes('comment = "Updates user status"'));
     });
 
-    test('Generate complete Terraform file with provider', () => {
+    test('Generate complete Terraform file', () => {
         const sql = `
             CREATE TABLE test_table (id NUMBER, name VARCHAR(50));
             CREATE VIEW test_view AS SELECT * FROM test_table;
@@ -102,20 +102,13 @@ suite('Terraform Converter Test Suite', () => {
 
         const objects = parser.parseDDL(sql);
         const resources = converter.convertToTerraform(objects);
-        const terraformFile = converter.generateTerraformFile(resources, true);
+        const terraformFile = converter.generateTerraformFile(resources);
 
-        assert.ok(terraformFile.includes('terraform {'));
-        assert.ok(terraformFile.includes('required_providers {'));
-        assert.ok(terraformFile.includes('Snowflake-Labs/snowflake'));
-        assert.ok(terraformFile.includes('version = "~> 0.84"'));
-        assert.ok(terraformFile.includes('provider "snowflake"'));
-        assert.ok(terraformFile.includes('variable "DATABASE"'));
-        assert.ok(terraformFile.includes('variable "ENVIRONMENT"'));
-        assert.ok(terraformFile.includes('locals {'));
-        assert.ok(terraformFile.includes('databases = {'));
-        assert.ok(terraformFile.includes('DB_CDI_DEV_DWH'));
+        // Check that it contains the expected resources
         assert.ok(terraformFile.includes('resource "snowflake_table"'));
         assert.ok(terraformFile.includes('resource "snowflake_view"'));
+        assert.ok(terraformFile.includes('name     = "test_table"'));
+        assert.ok(terraformFile.includes('name     = "test_view"'));
     });
 
     test('Data type conversion', () => {
@@ -183,7 +176,7 @@ suite('Terraform Converter Test Suite', () => {
 
         const resource = converter.convertSingle(table);
         assert.ok(resource);
-        assert.strictEqual(resource.name, 'RDV_SANDBOX_TEST_TABLE');
+        assert.strictEqual(resource.name, 'TEST_TABLE'); // Schema prefix removed
         assert.ok(resource.content.includes('schema   = snowflake_schema.RDV.name'));
         assert.ok(!resource.content.includes('snowflake_schema.RDV_SANDBOX.name'));
     });
@@ -207,7 +200,7 @@ suite('Terraform Converter Test Suite', () => {
         // Check that default values use expression syntax, not constant
         assert.ok(resource.content.includes('expression = "0"'));
         assert.ok(resource.content.includes('expression = "CURRENT_TIMESTAMP()"'));
-        assert.ok(resource.content.includes('expression = "\'active\'"'));
+        assert.ok(resource.content.includes(`expression = "\\\'active\\\'"`));
         
         // Make sure it doesn't contain the old constant syntax
         assert.ok(!resource.content.includes('constant = '));

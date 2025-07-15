@@ -345,6 +345,7 @@ export class TerraformConverter {
     return str
       .replace(/\\/g, '\\\\')     // Escape backslashes first
       .replace(/"/g, '\\"')       // Escape double quotes
+      .replace(/'/g, "\\'")       // Escape single quotes
       .replace(/\n/g, '\\n')      // Escape newlines
       .replace(/\r/g, '\\r')      // Escape carriage returns
       .replace(/\t/g, '\\t')      // Escape tabs
@@ -353,15 +354,10 @@ export class TerraformConverter {
   }
   
   /**
-   * Generate a complete Terraform file with provider configuration
+   * Generate a complete Terraform file with resources
    */
-  public generateTerraformFile(resources: TerraformResource[], includeProvider: boolean = true): string {
+  public generateTerraformFile(resources: TerraformResource[]): string {
     let content = '';
-    
-    if (includeProvider) {
-      content += this.generateProviderBlock();
-      content += '\n';
-    }
     
     for (let i = 0; i < resources.length; i++) {
       if (i > 0) {
@@ -371,9 +367,5 @@ export class TerraformConverter {
     }
     
     return content;
-  }
-  
-  private generateProviderBlock(): string {
-    return ``;
   }
 }

@@ -23,6 +23,21 @@ This VS Code extension converts Snowflake SQL DDL statements to Terraform 0.84 c
 2. Type "Snowflake to Terraform"
 3. Select the desired command
 
+### Method 3: Folder Conversion
+1. Right-click on a folder in the Explorer pane
+2. Select "Convert All SQL Files in Folder to Terraform"
+3. The extension will:
+   - Recursively find all `.sql` files in the folder and subfolders
+   - Convert each file's DDL statements to Terraform
+   - Save the converted files as `.tf` files alongside the original SQL files
+   - Show a progress indicator and summary of the conversion
+
+### Method 4: Command Palette Folder Conversion
+1. Press `Ctrl+Shift+P` (or `Cmd+Shift+P` on Mac)
+2. Type "Convert All SQL Files in Folder to Terraform"
+3. Select the folder when prompted
+4. The extension will process all SQL files recursively
+
 ## Example Workflow
 
 1. Open `examples/ecommerce_ddl.sql`

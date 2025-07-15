@@ -2,6 +2,23 @@
 
 All notable changes to the "sf2tf" extension will be documented in this file.
 
+## [0.2.5] - 2025-07-11
+
+### Added
+- **Folder Conversion**: New feature to convert all SQL files in a folder and its subfolders to Terraform
+  - Right-click on any folder in Explorer to access "Convert All SQL Files in Folder to Terraform"
+  - Recursive conversion of all `.sql` files in the selected folder and all subfolders
+  - Progress indicator during conversion with cancellation support
+  - Summary report showing number of files converted and DDL objects processed
+  - Error handling with detailed error reporting for failed conversions
+  - Automatic generation of `.tf` files alongside original SQL files
+  - Command Palette support for folder selection when no folder is selected
+
+### Enhanced
+- **User Experience**: Improved progress feedback during bulk conversions
+- **Error Handling**: Better error reporting and recovery for invalid SQL files
+- **Documentation**: Updated README and USAGE guides to cover folder conversion feature
+
 ## [0.2.4] - 2025-07-11
 
 ### Fixed

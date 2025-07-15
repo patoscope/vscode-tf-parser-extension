@@ -15,6 +15,7 @@ This extension has been fully developed, tested, and optimized with:
 
 - **Convert Selected SQL**: Convert selected Snowflake DDL statements to Terraform configuration
 - **Convert Entire File**: Convert an entire SQL file to Terraform configuration with provider block
+- **Convert Folder**: Recursively convert all SQL files in a folder and its subfolders to Terraform
 - **Preview Conversion**: Preview the Terraform output in a side panel before creating files
 - **Support for Multiple Object Types**:
   - Tables (with columns, data types, constraints, comments, clustering)
@@ -70,6 +71,16 @@ $$;
    - **Snowflake to Terraform: Convert Selected SQL to Terraform**
    - **Snowflake to Terraform: Convert Entire File to Terraform**
    - **Snowflake to Terraform: Preview Terraform Conversion**
+   - **Snowflake to Terraform: Convert All SQL Files in Folder to Terraform**
+
+### Method 3: Folder Conversion
+1. Right-click on any folder in the Explorer pane
+2. Select **Convert All SQL Files in Folder to Terraform**
+3. The extension will:
+   - Recursively find all `.sql` files in the folder and subfolders
+   - Convert each file's DDL statements to Terraform
+   - Save the converted files as `.tf` files alongside the original SQL files
+   - Show progress and conversion summary
 
 ## Output Examples
 

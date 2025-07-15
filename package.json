@@ -2,8 +2,8 @@
   "name": "sf2tf",
   "displayName": "Snowflake DDL to Terraform Converter",
   "description": "Convert Snowflake SQL DDL statements to Terraform 0.84 definitions with Azure DevOps pipeline support for tables, views, and stored procedures",
-  "version": "0.2.4",
-  "icon": "icon.png",
+  "version": "0.2.7",
+  "icon": "assets/icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/company/sf2tf.git"
@@ -32,6 +32,11 @@
         "command": "sf2tf.previewConversion",
         "title": "Preview Terraform Conversion",
         "category": "Snowflake to Terraform"
+      },
+      {
+        "command": "sf2tf.convertFolder",
+        "title": "Convert All SQL Files in Folder to Terraform",
+        "category": "Snowflake to Terraform"
       }
     ],
     "menus": {
@@ -52,6 +57,13 @@
           "group": "1_modification"
         }
       ],
+      "explorer/context": [
+        {
+          "when": "explorerResourceIsFolder",
+          "command": "sf2tf.convertFolder",
+          "group": "1_modification"
+        }
+      ],
       "commandPalette": [
         {
           "command": "sf2tf.convertSelection",
@@ -64,6 +76,10 @@
         {
           "command": "sf2tf.previewConversion",
           "when": "editorHasSelection"
+        },
+        {
+          "command": "sf2tf.convertFolder",
+          "when": "true"
         }
       ]
     }

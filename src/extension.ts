@@ -39,7 +39,7 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 
 			const terraformResources = converter.convertToTerraform(ddlObjects);
-			const terraformContent = converter.generateTerraformFile(terraformResources, false);
+			const terraformContent = converter.generateTerraformFile(terraformResources);
 
 			// Create new document with Terraform content
 			const doc = await vscode.workspace.openTextDocument({
@@ -77,7 +77,7 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 
 			const terraformResources = converter.convertToTerraform(ddlObjects);
-			const terraformContent = converter.generateTerraformFile(terraformResources, true);
+			const terraformContent = converter.generateTerraformFile(terraformResources);
 
 			// Suggest filename based on current file
 			const currentFileName = editor.document.fileName;
@@ -142,7 +142,7 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 
 			const terraformResources = converter.convertToTerraform(ddlObjects);
-			const terraformContent = converter.generateTerraformFile(terraformResources, false);
+			const terraformContent = converter.generateTerraformFile(terraformResources);
 
 			// Show preview in a new panel
 			const panel = vscode.window.createWebviewPanel(
@@ -161,7 +161,160 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	});
 
-	context.subscriptions.push(convertSelection, convertFile, previewConversion);
+	// Command to convert all SQL files in a folder and its subfolders to Terraform
+	const convertFolder = vscode.commands.registerCommand('sf2tf.convertFolder', async (uri?: vscode.Uri) => {
+		let folderUri: vscode.Uri | undefined;
+
+		if (uri) {
+			// Called from explorer context menu
+			folderUri = uri;
+		} else {
+			// Called from command palette, show folder picker
+			const options: vscode.OpenDialogOptions = {
+				canSelectFiles: false,
+				canSelectFolders: true,
+				canSelectMany: false,
+				openLabel: 'Select Folder'
+			};
+
+			const result = await vscode.window.showOpenDialog(options);
+			if (result && result.length > 0) {
+				folderUri = result[0];
+			}
+		}
+
+		if (!folderUri) {
+			vscode.window.showErrorMessage('No folder selected');
+			return;
+		}
+
+		try {
+			// Show progress indicator
+			await vscode.window.withProgress({
+				location: vscode.ProgressLocation.Notification,
+				title: 'Converting SQL files to Terraform',
+				cancellable: true
+			}, async (progress, token) => {
+				const sqlFiles = await findSqlFiles(folderUri!);
+				
+				if (sqlFiles.length === 0) {
+					vscode.window.showWarningMessage('No SQL files found in the selected folder');
+					return;
+				}
+
+				progress.report({ message: `Found ${sqlFiles.length} SQL file(s)` });
+
+				let convertedFiles = 0;
+				let totalObjects = 0;
+				const errors: string[] = [];
+
+				for (let i = 0; i < sqlFiles.length; i++) {
+					if (token.isCancellationRequested) {
+						break;
+					}
+
+					const sqlFile = sqlFiles[i];
+					const fileName = sqlFile.fsPath.split(/[/\\]/).pop() || 'unknown';
+					
+					progress.report({ 
+						message: `Converting ${fileName} (${i + 1}/${sqlFiles.length})`,
+						increment: (100 / sqlFiles.length) * 0.5
+					});
+
+					try {
+						const content = await vscode.workspace.fs.readFile(sqlFile);
+						const sqlContent = Buffer.from(content).toString('utf8');
+
+						if (sqlContent.trim()) {
+							const ddlObjects = parser.parseDDL(sqlContent);
+							
+							if (ddlObjects.length > 0) {
+								const terraformResources = converter.convertToTerraform(ddlObjects);
+								const terraformContent = converter.generateTerraformFile(terraformResources);
+
+								// Generate output file path
+								const relativePath = vscode.workspace.asRelativePath(sqlFile);
+								const outputPath = sqlFile.fsPath.replace(/\.sql$/i, '.tf');
+								const outputUri = vscode.Uri.file(outputPath);
+
+								// Write the Terraform file
+								await vscode.workspace.fs.writeFile(outputUri, Buffer.from(terraformContent, 'utf8'));
+								
+								convertedFiles++;
+								totalObjects += ddlObjects.length;
+							}
+						}
+					} catch (error) {
+						errors.push(`${fileName}: ${error}`);
+					}
+
+					progress.report({ 
+						increment: (100 / sqlFiles.length) * 0.5
+					});
+				}
+
+				if (token.isCancellationRequested) {
+					vscode.window.showWarningMessage('Conversion cancelled by user');
+					return;
+				}
+
+				// Show results
+				if (convertedFiles > 0) {
+					const message = `Successfully converted ${convertedFiles} SQL file(s) with ${totalObjects} DDL object(s) to Terraform`;
+					if (errors.length > 0) {
+						const showErrors = await vscode.window.showInformationMessage(
+							`${message}. ${errors.length} file(s) had errors.`,
+							'Show Errors'
+						);
+						if (showErrors === 'Show Errors') {
+							const errorPanel = vscode.window.createOutputChannel('SF2TF Conversion Errors');
+							errorPanel.appendLine('Conversion Errors:');
+							errors.forEach(error => errorPanel.appendLine(`- ${error}`));
+							errorPanel.show();
+						}
+					} else {
+						vscode.window.showInformationMessage(message);
+					}
+				} else {
+					if (errors.length > 0) {
+						vscode.window.showErrorMessage(`No files converted. ${errors.length} error(s) occurred.`);
+					} else {
+						vscode.window.showWarningMessage('No valid DDL statements found in any SQL files');
+					}
+				}
+			});
+
+		} catch (error) {
+			vscode.window.showErrorMessage(`Error during folder conversion: ${error}`);
+		}
+	});
+
+	context.subscriptions.push(convertSelection, convertFile, previewConversion, convertFolder);
+}
+
+// Helper function to recursively find all SQL files in a folder and its subfolders
+async function findSqlFiles(folderUri: vscode.Uri): Promise<vscode.Uri[]> {
+	const sqlFiles: vscode.Uri[] = [];
+	
+	try {
+		const entries = await vscode.workspace.fs.readDirectory(folderUri);
+		
+		for (const [name, type] of entries) {
+			const entryUri = vscode.Uri.joinPath(folderUri, name);
+			
+			if (type === vscode.FileType.Directory) {
+				// Recursively search subdirectories
+				const subFiles = await findSqlFiles(entryUri);
+				sqlFiles.push(...subFiles);
+			} else if (type === vscode.FileType.File && name.toLowerCase().endsWith('.sql')) {
+				sqlFiles.push(entryUri);
+			}
+		}
+	} catch (error) {
+		console.error(`Error reading directory ${folderUri.fsPath}:`, error);
+	}
+	
+	return sqlFiles;
 }
 
 function getWebviewContent(terraformContent: string, objectCount: number): string {
