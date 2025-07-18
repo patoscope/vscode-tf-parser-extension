@@ -9,16 +9,18 @@ export interface TerraformResource {
   type: string;
   name: string;
   content: string;
+  dependencies?: string[];
 }
 
 export class TerraformConverter {
   
   /**
-   * Convert array of DDL objects to Terraform resources
+   * Convert array of DDL objects to Terraform resources with dependency analysis
    */
   public convertToTerraform(objects: DDLObject[]): TerraformResource[] {
     const resources: TerraformResource[] = [];
     
+    // First pass: convert all objects to resources
     for (const obj of objects) {
       if ('columns' in obj) {
         // Table
@@ -40,6 +42,9 @@ export class TerraformConverter {
         }
       }
     }
+    
+    // Second pass: analyze dependencies and add depends_on clauses
+    this.analyzeDependencies(objects, resources);
     
     return resources;
   }
@@ -91,7 +96,8 @@ export class TerraformConverter {
     return {
       type: 'snowflake_table',
       name: resourceName,
-      content
+      content,
+      dependencies: []
     };
   }
   
@@ -130,7 +136,8 @@ export class TerraformConverter {
     return {
       type: 'snowflake_view',
       name: resourceName,
-      content
+      content,
+      dependencies: []
     };
   }
   
@@ -183,10 +190,167 @@ export class TerraformConverter {
     return {
       type: 'snowflake_procedure',
       name: resourceName,
-      content
+      content,
+      dependencies: []
     };
   }
   
+  /**
+   * Analyze dependencies between DDL objects and add depends_on clauses
+   */
+  private analyzeDependencies(objects: DDLObject[], resources: TerraformResource[]): void {
+    // Create mapping of object names to resource names for quick lookup
+    const objectToResource = new Map<string, string>();
+    
+    for (let i = 0; i < objects.length; i++) {
+      const obj = objects[i];
+      const resource = resources[i];
+      if (obj && resource) {
+        const fullName = this.getFullObjectName(obj);
+        objectToResource.set(fullName, resource.name);
+      }
+    }
+    
+    // Analyze each object for dependencies
+    for (let i = 0; i < objects.length; i++) {
+      const obj = objects[i];
+      const resource = resources[i];
+      if (!obj || !resource) {
+        continue;
+      }
+      
+      const dependencies: string[] = [];
+      
+      if ('query' in obj) {
+        // Views depend on tables/views referenced in their queries
+        const viewDependencies = this.extractViewDependencies(obj as ViewDefinition, objectToResource);
+        dependencies.push(...viewDependencies);
+      } else if ('body' in obj) {
+        // Procedures depend on tables/views referenced in their bodies
+        const procedureDependencies = this.extractProcedureDependencies(obj as ProcedureDefinition, objectToResource);
+        dependencies.push(...procedureDependencies);
+      }
+      
+      // Update the resource with dependencies and regenerate content if needed
+      if (dependencies.length > 0) {
+        resource.dependencies = dependencies;
+        resource.content = this.addDependsOnClause(resource.content, dependencies);
+      }
+    }
+  }
+  
+  /**
+   * Get the full qualified name of a DDL object
+   */
+  private getFullObjectName(obj: DDLObject): string {
+    let name = obj.name;
+    if (obj.schema) {
+      name = `${obj.schema}.${name}`;
+    }
+    if (obj.database) {
+      name = `${obj.database}.${obj.schema || ''}.${obj.name}`;
+    }
+    return name;
+  }
+  
+  /**
+   * Extract table/view dependencies from a view's SQL query
+   */
+  private extractViewDependencies(view: ViewDefinition, objectToResource: Map<string, string>): string[] {
+    const dependencies: string[] = [];
+    const query = view.query.toUpperCase();
+    
+    // Simple regex patterns to find FROM and JOIN clauses
+    // This is a basic implementation - could be enhanced with a proper SQL parser
+    const tableReferences = [
+      ...query.matchAll(/FROM\s+([a-zA-Z_][a-zA-Z0-9_]*\.?[a-zA-Z_][a-zA-Z0-9_]*\.?[a-zA-Z_][a-zA-Z0-9_]*)/gi),
+      ...query.matchAll(/JOIN\s+([a-zA-Z_][a-zA-Z0-9_]*\.?[a-zA-Z_][a-zA-Z0-9_]*\.?[a-zA-Z_][a-zA-Z0-9_]*)/gi)
+    ];
+    
+    for (const match of tableReferences) {
+      const referencedTable = match[1].toLowerCase();
+      
+      // Check if this table exists in our object mapping
+      for (const [fullName, resourceName] of objectToResource.entries()) {
+        if (this.matchesTableReference(fullName, referencedTable)) {
+          dependencies.push(`snowflake_table.${resourceName}`);
+          break;
+        }
+      }
+    }
+    
+    return [...new Set(dependencies)]; // Remove duplicates
+  }
+  
+  /**
+   * Extract table/view dependencies from a procedure's SQL body
+   */
+  private extractProcedureDependencies(procedure: ProcedureDefinition, objectToResource: Map<string, string>): string[] {
+    const dependencies: string[] = [];
+    const body = procedure.body.toUpperCase();
+    
+    // Look for table references in UPDATE, INSERT, DELETE, SELECT statements
+    const tableReferences = [
+      ...body.matchAll(/FROM\s+([a-zA-Z_][a-zA-Z0-9_]*\.?[a-zA-Z_][a-zA-Z0-9_]*\.?[a-zA-Z_][a-zA-Z0-9_]*)/gi),
+      ...body.matchAll(/UPDATE\s+([a-zA-Z_][a-zA-Z0-9_]*\.?[a-zA-Z_][a-zA-Z0-9_]*\.?[a-zA-Z_][a-zA-Z0-9_]*)/gi),
+      ...body.matchAll(/INTO\s+([a-zA-Z_][a-zA-Z0-9_]*\.?[a-zA-Z_][a-zA-Z0-9_]*\.?[a-zA-Z_][a-zA-Z0-9_]*)/gi),
+      ...body.matchAll(/DELETE\s+FROM\s+([a-zA-Z_][a-zA-Z0-9_]*\.?[a-zA-Z_][a-zA-Z0-9_]*\.?[a-zA-Z_][a-zA-Z0-9_]*)/gi)
+    ];
+    
+    for (const match of tableReferences) {
+      const referencedTable = match[1].toLowerCase();
+      
+      // Check if this table exists in our object mapping
+      for (const [fullName, resourceName] of objectToResource.entries()) {
+        if (this.matchesTableReference(fullName, referencedTable)) {
+          dependencies.push(`snowflake_table.${resourceName}`);
+          break;
+        }
+      }
+    }
+    
+    return [...new Set(dependencies)]; // Remove duplicates
+  }
+  
+  /**
+   * Check if a full object name matches a table reference from SQL
+   */
+  private matchesTableReference(fullName: string, reference: string): boolean {
+    const fullNameLower = fullName.toLowerCase();
+    const referenceLower = reference.toLowerCase();
+    
+    // Exact match
+    if (fullNameLower === referenceLower) {
+      return true;
+    }
+    
+    // Check if reference matches the end of fullName (schema.table matches database.schema.table)
+    const fullNameParts = fullNameLower.split('.');
+    const referenceParts = referenceLower.split('.');
+    
+    if (referenceParts.length <= fullNameParts.length) {
+      const relevantFullNameParts = fullNameParts.slice(-referenceParts.length);
+      return relevantFullNameParts.join('.') === referenceParts.join('.');
+    }
+    
+    return false;
+  }
+  
+  /**
+   * Add depends_on clause to Terraform resource content
+   */
+  private addDependsOnClause(content: string, dependencies: string[]): string {
+    // Find the insertion point (before the closing brace)
+    const lines = content.split('\n');
+    const lastLineIndex = lines.length - 1;
+    
+    // Insert depends_on clause before the closing brace
+    const dependsOnClause = `  depends_on = [${dependencies.join(', ')}]`;
+    lines.splice(lastLineIndex, 0, '', dependsOnClause);
+    
+    return lines.join('\n');
+  }
+
   private convertColumn(column: ColumnDefinition): string {
     let content = `  column {\n`;
     content += `    name = "${column.name}"\n`;

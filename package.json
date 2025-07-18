@@ -2,7 +2,7 @@
   "name": "sf2tf",
   "displayName": "Snowflake DDL to Terraform Converter",
   "description": "Convert Snowflake SQL DDL statements to Terraform 0.84 definitions with Azure DevOps pipeline support for tables, views, and stored procedures",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "icon": "assets/icon.png",
   "repository": {
     "type": "git",

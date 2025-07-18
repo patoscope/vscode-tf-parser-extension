@@ -2,6 +2,21 @@
 
 All notable changes to the "sf2tf" extension will be documented in this file.
 
+## [0.2.8] - 2025-07-18
+
+### Added
+- **Dependency Analysis**: New feature to analyze and generate Terraform resource dependencies
+  - Automatically detects table and view dependencies in DDL objects
+  - Analyzes view queries to identify table references (FROM, JOIN clauses)
+  - Analyzes stored procedure queries to identify table references (UPDATE, INSERT, DELETE statements)
+  - Generates proper `depends_on` clauses in Terraform resources to ensure correct creation order
+  - Comprehensive test coverage for dependency analysis functionality
+
+### Enhanced
+- **Test Coverage**: Added comprehensive unit tests for dependency analysis
+- **Code Quality**: Improved code structure and maintainability
+- **Resource Ordering**: Terraform resources now include proper dependency management
+
 ## [0.2.5] - 2025-07-11
 
 ### Added
