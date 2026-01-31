@@ -621,7 +621,16 @@ export class SnowflakeDDLParser {
         return null;
       }
       
-      // Parse: column_name data_type [NOT NULL] [DEFAULT value] [COMMENT 'comment']
+      // Extract comment first, as it may contain spaces
+      let comment: string | undefined;
+      const commentMatch = columnText.match(/COMMENT\s+'([^']*(?:''[^']*)*)'/i);
+      if (commentMatch) {
+        comment = commentMatch[1].replace(/''/g, "'");
+        // Remove the comment from the column text for further parsing
+        columnText = columnText.replace(/COMMENT\s+'([^']*(?:''[^']*)*)'/i, '').trim();
+      }
+      
+      // Parse: column_name data_type [NOT NULL] [DEFAULT value]
       const parts = columnText.trim().split(/\s+/);
       if (parts.length < 2) {
         return null;
@@ -642,7 +651,6 @@ export class SnowflakeDDLParser {
       
       let nullable = true;
       let defaultValue: string | undefined;
-      let comment: string | undefined;
       
       // Parse remaining parts
       while (i < parts.length) {
@@ -668,28 +676,8 @@ export class SnowflakeDDLParser {
             }
             i++;
           }
-        } else if (part === 'COMMENT') {
-          i++;
-          if (i < parts.length) {
-            comment = parts[i];
-            // Handle quoted comments
-            if (comment.startsWith("'")) {
-              comment = comment.slice(1);
-              if (!comment.endsWith("'")) {
-                while (i + 1 < parts.length && !parts[i].endsWith("'")) {
-                  i++;
-                  comment += ' ' + parts[i];
-                }
-              }
-              if (comment.endsWith("'")) {
-                comment = comment.slice(0, -1);
-              }
-            }
-            // Convert SQL's escaped quotes ('') to single quotes (')
-            comment = comment.replace(/''/g, "'");
-            i++;
-          }
         } else {
+          // Unknown part, skip
           i++;
         }
       }

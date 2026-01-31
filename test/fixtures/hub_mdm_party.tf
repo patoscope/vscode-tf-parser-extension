@@ -51,7 +51,7 @@ resource "snowflake_table" "RDV_MDM_HUB_MDM_PARTY" {
   column {
     name = "ID_PARTY"
     type = "VARCHAR(16777216)"
-    comment = "colonne ID du fichier"
+    comment = "colonne ID de l'agence"
   }
 }
 

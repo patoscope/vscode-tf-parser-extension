@@ -61,7 +61,7 @@ suite('Terraform Converter Test Suite', () => {
 
         const resource = converter.convertSingle(table);
         assert.ok(resource);
-        assert.ok(resource.content.includes('comment = "Code de l\\\'agence"'));
+        assert.ok(resource.content.includes('comment = "Code de l\'agence"'));
     });
 
     test('Convert view to Terraform', () => {
@@ -215,7 +215,7 @@ suite('Terraform Converter Test Suite', () => {
         // - String literals use 'expression' (with quotes)
         assert.ok(resource.content.includes('constant = 0'));
         assert.ok(resource.content.includes('expression = "CURRENT_TIMESTAMP()"'));
-        assert.ok(resource.content.includes(`expression = "\\'active\\'"`));
+        assert.ok(resource.content.includes(`expression = "'active'"`));
     });
 
     test('Analyze dependencies and generate depends_on clauses', () => {
