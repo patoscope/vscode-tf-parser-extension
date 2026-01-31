@@ -265,7 +265,7 @@ export class TerraformConverter {
     
     // Add comment if present and not for OWNER procedures
     if (procedure.comment && procedure.executeAs !== "OWNER") {
-      content += `  comment = "${procedure.comment}"\n`;
+      content += `  comment = "${this.escapeString(procedure.comment)}"\n`;
     }
     
     // Add execute_as for JavaScript procedures (after arguments)

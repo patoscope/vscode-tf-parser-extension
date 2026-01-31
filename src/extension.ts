@@ -55,14 +55,31 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 
 	// Command to convert entire file to Terraform
-	const convertFile = vscode.commands.registerCommand('sf2tf.convertFile', async () => {
-		const editor = vscode.window.activeTextEditor;
-		if (!editor) {
-			vscode.window.showErrorMessage('No active editor found');
-			return;
+	const convertFile = vscode.commands.registerCommand('sf2tf.convertFile', async (uri?: vscode.Uri) => {
+		let document: vscode.TextDocument | undefined;
+		let fileUri: vscode.Uri | undefined;
+
+		if (uri) {
+			// Called from explorer context menu
+			fileUri = uri;
+			try {
+				document = await vscode.workspace.openTextDocument(uri);
+			} catch (error) {
+				vscode.window.showErrorMessage(`Error opening file: ${error}`);
+				return;
+			}
+		} else {
+			// Called from command palette or editor context
+			const editor = vscode.window.activeTextEditor;
+			if (!editor) {
+				vscode.window.showErrorMessage('No active editor found');
+				return;
+			}
+			document = editor.document;
+			fileUri = document.uri;
 		}
 
-		const fullText = editor.document.getText();
+		const fullText = document.getText();
 		
 		if (!fullText.trim()) {
 			vscode.window.showErrorMessage('File is empty');
@@ -80,7 +97,7 @@ export function activate(context: vscode.ExtensionContext) {
 			const terraformContent = converter.generateTerraformFile(terraformResources);
 
 			// Suggest filename based on current file
-			const currentFileName = editor.document.fileName;
+			const currentFileName = fileUri.fsPath;
 			const baseName = currentFileName.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || 'converted';
 			const suggestedName = `${baseName}.tf`;
 

@@ -59,6 +59,11 @@
       ],
       "explorer/context": [
         {
+          "when": "resourceExtname == .sql",
+          "command": "sf2tf.convertFile",
+          "group": "1_modification"
+        },
+        {
           "when": "explorerResourceIsFolder",
           "command": "sf2tf.convertFolder",
           "group": "1_modification"
@@ -103,6 +108,7 @@
     "@typescript-eslint/parser": "^8.31.1",
     "@vscode/test-cli": "^0.0.11",
     "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.7.1",
     "eslint": "^9.25.1",
     "ts-loader": "^9.5.2",
     "ts-node": "^10.9.2",

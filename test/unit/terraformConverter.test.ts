@@ -51,6 +51,19 @@ suite('Terraform Converter Test Suite', () => {
         assert.ok(resource.content.includes('comment = "Product display name"'));
     });
 
+    test('Convert table with single quote in comment', () => {
+        const table: TableDefinition = {
+            name: 'test_table',
+            columns: [
+                { name: 'id', type: 'NUMBER', nullable: false, comment: 'Code de l\'agence' }
+            ]
+        };
+
+        const resource = converter.convertSingle(table);
+        assert.ok(resource);
+        assert.ok(resource.content.includes('comment = "Code de l\\\'agence"'));
+    });
+
     test('Convert view to Terraform', () => {
         const view: ViewDefinition = {
             name: 'active_users',
