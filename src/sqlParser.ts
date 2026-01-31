@@ -367,7 +367,23 @@ export class SnowflakeDDLParser {
       
       const columnsText = columnsMatch[1];
       const columns = this.parseColumns(columnsText);
-      const constraints = this.parseConstraints(columnsText);
+      let constraints = this.parseConstraints(columnsText);
+      
+      // Parse constraints that appear after the column definitions (table-level constraints)
+      const afterColumns = cleanedStatement.substring(cleanedStatement.indexOf(')') + 1);
+      const additionalConstraints = this.parseConstraints(afterColumns);
+      
+      // Deduplicate constraints by name (case-insensitive)
+      const seenNames = new Set<string>();
+      const allConstraints = [...constraints, ...additionalConstraints];
+      constraints = allConstraints.filter(c => {
+        const lowerName = c.name.toLowerCase();
+        if (seenNames.has(lowerName)) {
+          return false;
+        }
+        seenNames.add(lowerName);
+        return true;
+      });
       
       // Extract comment
       const commentMatch = cleanedStatement.match(/COMMENT\s*=\s*'([^']*)'/i);
@@ -695,35 +711,44 @@ export class SnowflakeDDLParser {
     }
   }
 
-  private parseConstraints(columnsText: string): ConstraintDefinition[] {
+  private parseConstraints(constraintsText: string): ConstraintDefinition[] {
     const constraints: ConstraintDefinition[] = [];
+    const seenNames = new Set<string>();
     
-    // Split by comma but respecting parentheses (for multi-column constraints)
-    const lines = this.splitByComma(columnsText);
+    // Use case-insensitive regex but preserve original case from the input text
+    const tableConstraintRegex = /constraint\s+([^\s,]+)\s+(primary\s+key|foreign\s+key|unique|check)\s*\(([^)]+)\)([^,]*,?)/gi;
+    let match;
     
-    for (const line of lines) {
-      const trimmed = line.trim();
-      
-      // Match CONSTRAINT name TYPE (columns) [properties]
-      const constraintMatch = trimmed.match(/^CONSTRAINT\s+([^\s]+)\s+(PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE|CHECK)\s*\(([^)]+)\)(.*)/i);
-      if (constraintMatch) {
-        const [, name, type, columnsStr, properties] = constraintMatch;
-        const columns = columnsStr.split(',').map(col => this.cleanIdentifier(col.trim()));
-        const typeStr = type.toUpperCase();
-        
-        // Parse properties like RELY, DEFERRABLE, ENABLE
-        const props: Record<string, any> = {};
-        props.rely = /RELY/i.test(properties) ? true : false;
-        props.deferrable = /DEFERRABLE/i.test(properties) ? true : false;
-        props.enable = /ENABLE/i.test(properties) ? true : false;
-        
-        constraints.push({
-          name: this.cleanIdentifier(name),
-          type: typeStr,
-          columns,
-          properties: props
-        });
+    while ((match = tableConstraintRegex.exec(constraintsText)) !== null) {
+      const [, name, type, columnsStr, properties] = match;
+      const lowerName = name.toLowerCase();
+      if (seenNames.has(lowerName)) {
+        continue; // Skip duplicate constraints
       }
+      seenNames.add(lowerName);
+      
+      // Preserve original case for column names by finding them in the original text
+      const columns = columnsStr.split(',').map(col => {
+        const trimmed = col.trim();
+        // Find the column name in the original text to preserve case
+        const colMatch = constraintsText.match(new RegExp(`\\b${trimmed}\\b`, 'i'));
+        return colMatch ? colMatch[0] : this.cleanIdentifier(trimmed);
+      });
+      const typeStr = type.toUpperCase();
+      
+      // Parse properties like rely, deferrable, enable
+      const props: Record<string, any> = {};
+      const lowerProperties = properties.toLowerCase();
+      props.rely = /rely/.test(lowerProperties) ? true : false;
+      props.deferrable = /deferrable/.test(lowerProperties) ? true : false;
+      props.enable = /enable/.test(lowerProperties) ? true : false;
+      
+      constraints.push({
+        name: this.cleanIdentifier(name),
+        type: typeStr,
+        columns,
+        properties: props
+      });
     }
     
     return constraints;

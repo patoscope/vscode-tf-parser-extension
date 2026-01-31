@@ -96,10 +96,30 @@ export function activate(context: vscode.ExtensionContext) {
 			const terraformResources = converter.convertToTerraform(ddlObjects);
 			const terraformContent = converter.generateTerraformFile(terraformResources);
 
-			// Suggest filename based on current file
-			const currentFileName = fileUri.fsPath;
-			const baseName = currentFileName.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || 'converted';
-			const suggestedName = `${baseName}.tf`;
+			// Suggest filename based on current file or first object
+			let suggestedName: string;
+			if (ddlObjects.length === 1) {
+				const obj = ddlObjects[0];
+				let schema = obj.schema || '';
+				let typeStr = 'unknown';
+				let objName = obj.name;
+				if ('query' in obj) {
+					typeStr = 'views';
+				} else if ('body' in obj) {
+					typeStr = 'procedures';
+				} else if ('columns' in obj) {
+					typeStr = 'tables';
+				}
+				// Clean and lower case
+				schema = schema.replace(/_SANDBOX$/i, '').toLowerCase();
+				typeStr = typeStr.toLowerCase();
+				objName = objName.toLowerCase();
+				suggestedName = `${schema}.${typeStr}.${objName}.tf`;
+			} else {
+				const currentFileName = fileUri.fsPath;
+				const baseName = currentFileName.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || 'converted';
+				suggestedName = `${baseName.toLowerCase()}.tf`;
+			}
 
 			// Create new document with Terraform content
 			const doc = await vscode.workspace.openTextDocument({
@@ -205,6 +225,56 @@ export function activate(context: vscode.ExtensionContext) {
 			return;
 		}
 
+		// Prompt for output folder
+		const outputOptions: vscode.OpenDialogOptions = {
+			canSelectFiles: true,
+			canSelectFolders: true,
+			canSelectMany: false,
+			openLabel: 'Select Output Folder for Terraform Files',
+			filters: {
+				'Terraform Files': ['tf']
+			}
+		};
+
+		const outputResult = await vscode.window.showOpenDialog(outputOptions);
+		if (!outputResult || outputResult.length === 0) {
+			vscode.window.showErrorMessage('No output folder selected');
+			return;
+		}
+
+		let outputFolderUri = outputResult[0];
+		
+		// If a file was selected, use its parent directory
+		const stat = await vscode.workspace.fs.stat(outputFolderUri);
+		if (stat.type === vscode.FileType.File) {
+			outputFolderUri = vscode.Uri.joinPath(outputFolderUri, '..');
+		}
+
+		// Check for existing .tf files in the output folder
+		try {
+			const existingFiles = await vscode.workspace.fs.readDirectory(outputFolderUri);
+			const existingTfFiles = existingFiles
+				.filter(([name, type]) => type === vscode.FileType.File && name.endsWith('.tf'))
+				.map(([name]) => name);
+
+			if (existingTfFiles.length > 0) {
+				const fileList = existingTfFiles.slice(0, 10).join('\n') + 
+					(existingTfFiles.length > 10 ? `\n... and ${existingTfFiles.length - 10} more` : '');
+				
+				const proceed = await vscode.window.showWarningMessage(
+					`The selected output folder contains ${existingTfFiles.length} existing .tf file(s):\n${fileList}\n\nDo you want to proceed? Existing files may be overwritten.`,
+					'Proceed',
+					'Cancel'
+				);
+				
+				if (proceed !== 'Proceed') {
+					return;
+				}
+			}
+		} catch (error) {
+			// Ignore errors when checking existing files
+		}
+
 		try {
 			// Show progress indicator
 			await vscode.window.withProgress({
@@ -247,18 +317,71 @@ export function activate(context: vscode.ExtensionContext) {
 							
 							if (ddlObjects.length > 0) {
 								const terraformResources = converter.convertToTerraform(ddlObjects);
-								const terraformContent = converter.generateTerraformFile(terraformResources);
-
-								// Generate output file path
-								const relativePath = vscode.workspace.asRelativePath(sqlFile);
-								const outputPath = sqlFile.fsPath.replace(/\.sql$/i, '.tf');
-								const outputUri = vscode.Uri.file(outputPath);
-
-								// Write the Terraform file
-								await vscode.workspace.fs.writeFile(outputUri, Buffer.from(terraformContent, 'utf8'));
 								
-								convertedFiles++;
-								totalObjects += ddlObjects.length;
+								// Group resources by DDL object
+								let resourceIndex = 0;
+								for (let j = 0; j < ddlObjects.length; j++) {
+									const ddlObject = ddlObjects[j];
+									const objectResources: string[] = [];
+									
+									// Add the main resource for this object
+									if (resourceIndex < terraformResources.length) {
+										objectResources.push(terraformResources[resourceIndex].content);
+										resourceIndex++;
+									}
+									
+									// For tables, add all constraint resources that follow
+									if ('columns' in ddlObject) {
+										while (resourceIndex < terraformResources.length && 
+											   terraformResources[resourceIndex].type === 'snowflake_table_constraint') {
+											objectResources.push(terraformResources[resourceIndex].content);
+											resourceIndex++;
+										}
+									}
+									
+									// Combine all resources for this object into one file
+									const objectContent = objectResources.join('\n\n');
+									
+									// Determine schema, object type, and object name
+									let schema = '';
+									let objectType = 'unknown';
+									let objectName = 'unknown';
+									
+									if ('query' in ddlObject) {
+										// View
+										const view = ddlObject as any;
+										schema = view.schema || '';
+										objectType = 'views';
+										objectName = view.name;
+									} else if ('body' in ddlObject) {
+										// Procedure
+										const procedure = ddlObject as any;
+										schema = procedure.schema || '';
+										objectType = 'procedures';
+										objectName = procedure.name;
+									} else if ('columns' in ddlObject) {
+										// Table
+										const table = ddlObject as any;
+										schema = table.schema || '';
+										objectType = 'tables';
+										objectName = table.name;
+									}
+									
+									// Clean schema name and make all names lower case
+									schema = schema.replace(/_SANDBOX$/i, '').toLowerCase();
+									objectName = objectName.toLowerCase();
+									objectType = objectType.toLowerCase();
+									
+									// Generate output file path directly in output folder
+									const outputFileName = `${schema}.${objectType}.${objectName}.tf`;
+									const outputUri = vscode.Uri.joinPath(outputFolderUri, outputFileName);
+									
+									// Write the Terraform file for this object
+									await vscode.workspace.fs.writeFile(outputUri, Buffer.from(objectContent, 'utf8'));
+									
+									convertedFiles++;
+									totalObjects++;
+								}
 							}
 						}
 					} catch (error) {
@@ -277,7 +400,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 				// Show results
 				if (convertedFiles > 0) {
-					const message = `Successfully converted ${convertedFiles} SQL file(s) with ${totalObjects} DDL object(s) to Terraform`;
+					const message = `Successfully converted ${convertedFiles} DDL object(s) to Terraform files`;
 					if (errors.length > 0) {
 						const showErrors = await vscode.window.showInformationMessage(
 							`${message}. ${errors.length} file(s) had errors.`,
@@ -294,7 +417,7 @@ export function activate(context: vscode.ExtensionContext) {
 					}
 				} else {
 					if (errors.length > 0) {
-						vscode.window.showErrorMessage(`No files converted. ${errors.length} error(s) occurred.`);
+						vscode.window.showErrorMessage(`No objects converted. ${errors.length} error(s) occurred.`);
 					} else {
 						vscode.window.showWarningMessage('No valid DDL statements found in any SQL files');
 					}

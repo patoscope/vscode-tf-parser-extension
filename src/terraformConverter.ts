@@ -126,6 +126,7 @@ export class TerraformConverter {
     
     let content = `resource "snowflake_table_constraint" "${constraintResourceName}" {\n`;
     content += `  name = "${constraint.name}"\n\n`;
+    
     content += `  type = "${constraint.type}"\n`;
     content += `  table_id = snowflake_table.${tableName}.fully_qualified_name\n\n`;
     
@@ -339,8 +340,8 @@ export class TerraformConverter {
       
       const dependencies: string[] = [];
       
-      // Tables depend on their schema, but views and procedures do not include schema in depends_on
-      if (obj.schema && 'columns' in obj && !('query' in obj) && !('body' in obj)) {
+      // All objects depend on their schema
+      if (obj.schema) {
         const schemaRef = this.convertToSchemaReference(obj.schema);
         dependencies.push(`snowflake_schema.${schemaRef}`);
       }
@@ -356,8 +357,7 @@ export class TerraformConverter {
       }
       
       // Update the resource with dependencies and regenerate content if needed
-      // Add depends_on for views and procedures to match reference files
-      if (dependencies.length > 0 && ('query' in obj || 'body' in obj)) {
+      if (dependencies.length > 0) {
         resource.dependencies = dependencies;
         resource.content = this.addDependsOnClause(resource.content, dependencies);
       }
@@ -517,10 +517,10 @@ export class TerraformConverter {
   private addDependsOnClause(content: string, dependencies: string[]): string {
     const lines = content.split('\n');
     
-    // Find the line with 'EOT' (end of statement) to insert depends_on after it
+    // Find the line with 'name = ' to insert depends_on after it
     let insertIndex = -1;
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].trim() === 'EOT') {
+      if (lines[i].trim().startsWith('name = ')) {
         insertIndex = i + 1;
         break;
       }
@@ -532,13 +532,13 @@ export class TerraformConverter {
     }
     
     // Build depends_on clause with proper formatting
-    const dependsOnLines = ['', 'depends_on = ['];
+    const dependsOnLines = ['', '  depends_on = ['];
     for (let i = 0; i < dependencies.length; i++) {
       const dep = dependencies[i];
       const isLast = i === dependencies.length - 1;
       dependsOnLines.push(`    ${dep}${isLast ? '' : ','}`);
     }
-    dependsOnLines.push('  ]');
+    dependsOnLines.push('  ]', '');
     
     // Insert all lines at once
     lines.splice(insertIndex, 0, ...dependsOnLines);
@@ -675,10 +675,8 @@ export class TerraformConverter {
     formatted = formatted.replace(/DB_CDI_DEV_DM/g, '${local.databases["DM"]}');
     
     // Replace schema names (remove _SANDBOX suffix)
-    formatted = formatted.replace(/RDV_MDM_SANDBOX/g, 'RDV_MDM');
-    formatted = formatted.replace(/BDV_MDM_SANDBOX/g, 'BDV_MDM');
-    formatted = formatted.replace(/TOOLS_SANDBOX/g, 'TOOLS');
-    // Add more as needed
+    formatted = formatted.replace(/_SANDBOX\b/g, '');
+    // Add more replacements as needed
     
     return formatted;
   }
