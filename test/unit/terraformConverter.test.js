@@ -1,18 +1,50 @@
-import * as assert from 'assert';
-import { TerraformConverter } from '../terraformConverter';
-import { SnowflakeDDLParser, TableDefinition, ViewDefinition, ProcedureDefinition } from '../sqlParser';
-
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+const assert = __importStar(require("assert"));
+const terraformConverter_1 = require("../../src/terraformConverter");
+const sqlParser_1 = require("../../src/sqlParser");
 suite('Terraform Converter Test Suite', () => {
-    let converter: TerraformConverter;
-    let parser: SnowflakeDDLParser;
-
+    let converter;
+    let parser;
     setup(() => {
-        converter = new TerraformConverter();
-        parser = new SnowflakeDDLParser();
+        converter = new terraformConverter_1.TerraformConverter();
+        parser = new sqlParser_1.SnowflakeDDLParser();
     });
-
     test('Convert simple table to Terraform', () => {
-        const table: TableDefinition = {
+        const table = {
             name: 'users',
             columns: [
                 { name: 'id', type: 'NUMBER(38,0)', nullable: false },
@@ -20,7 +52,6 @@ suite('Terraform Converter Test Suite', () => {
                 { name: 'email', type: 'VARCHAR(255)', nullable: true, defaultValue: "'test@example.com'" }
             ]
         };
-
         const resource = converter.convertSingle(table);
         assert.ok(resource);
         assert.strictEqual(resource.type, 'snowflake_table');
@@ -29,9 +60,8 @@ suite('Terraform Converter Test Suite', () => {
         assert.ok(resource.content.includes('nullable = false'));
         assert.ok(resource.content.includes('type = "NUMBER(38,0)"'));
     });
-
     test('Convert table with schema to Terraform', () => {
-        const table: TableDefinition = {
+        const table = {
             name: 'products',
             schema: 'sales',
             database: 'company_db',
@@ -41,7 +71,6 @@ suite('Terraform Converter Test Suite', () => {
             ],
             comment: 'Products catalog'
         };
-
         const resource = converter.convertSingle(table);
         assert.ok(resource);
         assert.strictEqual(resource.name, 'PRODUCTS'); // Schema prefix removed
@@ -50,16 +79,14 @@ suite('Terraform Converter Test Suite', () => {
         assert.ok(resource.content.includes('comment  = "Products catalog"'));
         assert.ok(resource.content.includes('comment = "Product display name"'));
     });
-
     test('Convert view to Terraform', () => {
-        const view: ViewDefinition = {
+        const view = {
             name: 'active_users',
             schema: 'public',
             query: 'SELECT id, name FROM users WHERE active = TRUE',
             secure: true,
             comment: 'View of active users only'
         };
-
         const resource = converter.convertSingle(view);
         assert.ok(resource);
         assert.strictEqual(resource.type, 'snowflake_view');
@@ -68,9 +95,8 @@ suite('Terraform Converter Test Suite', () => {
         assert.ok(resource.content.includes('comment  = "View of active users only"'));
         assert.ok(resource.content.includes('SELECT id, name FROM users WHERE active = TRUE'));
     });
-
     test('Convert procedure to Terraform', () => {
-        const procedure: ProcedureDefinition = {
+        const procedure = {
             name: 'update_status',
             schema: 'admin',
             parameters: [
@@ -82,7 +108,6 @@ suite('Terraform Converter Test Suite', () => {
             body: 'BEGIN\n  UPDATE users SET active = new_status WHERE id = user_id;\n  RETURN \'Success\';\nEND;',
             comment: 'Updates user status'
         };
-
         const resource = converter.convertSingle(procedure);
         assert.ok(resource);
         assert.strictEqual(resource.type, 'snowflake_procedure');
@@ -93,26 +118,22 @@ suite('Terraform Converter Test Suite', () => {
         assert.ok(resource.content.includes('default_value = "TRUE"'));
         assert.ok(resource.content.includes('comment = "Updates user status"'));
     });
-
     test('Generate complete Terraform file', () => {
         const sql = `
             CREATE TABLE test_table (id NUMBER, name VARCHAR(50));
             CREATE VIEW test_view AS SELECT * FROM test_table;
         `;
-
         const objects = parser.parseDDL(sql);
         const resources = converter.convertToTerraform(objects);
         const terraformFile = converter.generateTerraformFile(resources);
-
         // Check that it contains the expected resources
         assert.ok(terraformFile.includes('resource "snowflake_table"'));
         assert.ok(terraformFile.includes('resource "snowflake_view"'));
         assert.ok(terraformFile.includes('name     = "test_table"'));
         assert.ok(terraformFile.includes('name     = "test_view"'));
     });
-
     test('Data type conversion', () => {
-        const table: TableDefinition = {
+        const table = {
             name: 'type_test',
             columns: [
                 { name: 'int_col', type: 'INT', nullable: true },
@@ -122,7 +143,6 @@ suite('Terraform Converter Test Suite', () => {
                 { name: 'varchar_col', type: 'VARCHAR(100)', nullable: true }
             ]
         };
-
         const resource = converter.convertSingle(table);
         assert.ok(resource);
         assert.ok(resource.content.includes('type = "NUMBER(38,0)"')); // INT -> NUMBER(38,0)
@@ -131,9 +151,8 @@ suite('Terraform Converter Test Suite', () => {
         assert.ok(resource.content.includes('type = "TIMESTAMP_NTZ(9)"')); // TIMESTAMP -> TIMESTAMP_NTZ(9)
         assert.ok(resource.content.includes('type = "VARCHAR(100)"')); // VARCHAR(100) stays the same
     });
-
     test('Handle table with clustering', () => {
-        const table: TableDefinition = {
+        const table = {
             name: 'clustered_table',
             columns: [
                 { name: 'date_col', type: 'DATE', nullable: false },
@@ -141,21 +160,18 @@ suite('Terraform Converter Test Suite', () => {
             ],
             clusterBy: ['date_col', 'id_col']
         };
-
         const resource = converter.convertSingle(table);
         assert.ok(resource);
         assert.ok(resource.content.includes('cluster_by = ["date_col", "id_col"]'));
     });
-
     test('Escape special characters in strings', () => {
-        const table: TableDefinition = {
+        const table = {
             name: 'escape_test',
             columns: [
                 { name: 'test_col', type: 'VARCHAR(100)', nullable: true, comment: 'Comment with "quotes" and \\ backslashes' }
             ],
             comment: 'Table comment with\nnewlines and\ttabs'
         };
-
         const resource = converter.convertSingle(table);
         assert.ok(resource);
         assert.ok(resource.content.includes('\\"quotes\\"'));
@@ -163,9 +179,8 @@ suite('Terraform Converter Test Suite', () => {
         assert.ok(resource.content.includes('\\n'));
         assert.ok(resource.content.includes('\\t'));
     });
-
     test('Remove _SANDBOX suffix from schema references', () => {
-        const table: TableDefinition = {
+        const table = {
             name: 'test_table',
             schema: 'RDV_SANDBOX',
             database: 'DB_CDI_DEV_DWH',
@@ -173,16 +188,14 @@ suite('Terraform Converter Test Suite', () => {
                 { name: 'id', type: 'NUMBER(38,0)', nullable: false }
             ]
         };
-
         const resource = converter.convertSingle(table);
         assert.ok(resource);
         assert.strictEqual(resource.name, 'TEST_TABLE'); // Schema prefix removed
         assert.ok(resource.content.includes('schema   = snowflake_schema.RDV.name'));
         assert.ok(!resource.content.includes('snowflake_schema.RDV_SANDBOX.name'));
     });
-
     test('Convert table with default values using expression syntax', () => {
-        const table: TableDefinition = {
+        const table = {
             name: 'test_defaults',
             columns: [
                 { name: 'id', type: 'NUMBER(38,0)', nullable: false },
@@ -191,21 +204,17 @@ suite('Terraform Converter Test Suite', () => {
                 { name: 'status', type: 'VARCHAR(50)', nullable: true, defaultValue: "'active'" }
             ]
         };
-
         const resource = converter.convertSingle(table);
         assert.ok(resource);
         assert.strictEqual(resource.type, 'snowflake_table');
         assert.strictEqual(resource.name, 'TEST_DEFAULTS');
-        
         // Check that default values use expression syntax, not constant
         assert.ok(resource.content.includes('expression = "0"'));
         assert.ok(resource.content.includes('expression = "CURRENT_TIMESTAMP()"'));
         assert.ok(resource.content.includes(`expression = "\\\'active\\\'"`));
-        
         // Make sure it doesn't contain the old constant syntax
         assert.ok(!resource.content.includes('constant = '));
     });
-
     test('Analyze dependencies and generate depends_on clauses', () => {
         // Test SQL with clear dependencies
         const sql = `
@@ -264,23 +273,19 @@ suite('Terraform Converter Test Suite', () => {
                 RETURN 'User status updated successfully';
             END;
         `;
-
         const objects = parser.parseDDL(sql);
         const resources = converter.convertToTerraform(objects);
-        
         // Should have: users table, products table, active_users view, order_summary view, update_user_status procedure
         assert.strictEqual(resources.length, 5);
-        
         // Find the active_users view resource
-        const activeUsersResource = resources.find(r => r.name === 'ACTIVE_USERS');
+        const activeUsersResource = resources.find((r) => r.name === 'ACTIVE_USERS');
         assert.ok(activeUsersResource);
         assert.ok(activeUsersResource.dependencies);
         assert.ok(activeUsersResource.dependencies.length > 0);
         assert.ok(activeUsersResource.dependencies.includes('snowflake_table.USERS'));
         assert.ok(activeUsersResource.content.includes('depends_on = [snowflake_table.USERS]'));
-        
         // Find the order_summary view resource
-        const orderSummaryResource = resources.find(r => r.name === 'ORDER_SUMMARY');
+        const orderSummaryResource = resources.find((r) => r.name === 'ORDER_SUMMARY');
         assert.ok(orderSummaryResource);
         assert.ok(orderSummaryResource.dependencies);
         assert.ok(orderSummaryResource.dependencies.length > 0);
@@ -288,24 +293,22 @@ suite('Terraform Converter Test Suite', () => {
         assert.ok(orderSummaryResource.dependencies.includes('snowflake_table.USERS'));
         assert.ok(orderSummaryResource.dependencies.includes('snowflake_table.PRODUCTS'));
         assert.ok(orderSummaryResource.content.includes('depends_on = ['));
-        
         // Find the procedure resource
-        const procedureResource = resources.find(r => r.name === 'UPDATE_USER_STATUS');
+        const procedureResource = resources.find((r) => r.name === 'UPDATE_USER_STATUS');
         assert.ok(procedureResource);
         assert.ok(procedureResource.dependencies);
         assert.ok(procedureResource.dependencies.length > 0);
         assert.ok(procedureResource.dependencies.includes('snowflake_table.USERS'));
         assert.ok(procedureResource.content.includes('depends_on = [snowflake_table.USERS]'));
-        
         // Base tables should have no dependencies
-        const usersResource = resources.find(r => r.name === 'USERS');
+        const usersResource = resources.find((r) => r.name === 'USERS');
         assert.ok(usersResource);
         assert.ok(!usersResource.dependencies || usersResource.dependencies.length === 0);
         assert.ok(!usersResource.content.includes('depends_on ='));
-        
-        const productsResource = resources.find(r => r.name === 'PRODUCTS');
+        const productsResource = resources.find((r) => r.name === 'PRODUCTS');
         assert.ok(productsResource);
         assert.ok(!productsResource.dependencies || productsResource.dependencies.length === 0);
         assert.ok(!productsResource.content.includes('depends_on ='));
     });
 });
+//# sourceMappingURL=terraformConverter.test.js.map

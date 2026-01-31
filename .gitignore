@@ -1,5 +1,6 @@
 out
 dist
 node_modules
+test-output/
 .vscode-test/
-*.vsix
+*.vsixtest-output/

@@ -11,11 +11,23 @@ export interface ColumnDefinition {
   comment?: string;
 }
 
+export interface ViewColumn {
+  name: string;
+}
+
+export interface ConstraintDefinition {
+  name: string;
+  type: string; // 'primary_key', 'foreign_key', etc.
+  columns: string[];
+  properties?: Record<string, any>; // rely, deferrable, enable, etc.
+}
+
 export interface TableDefinition {
   name: string;
   schema?: string;
   database?: string;
   columns: ColumnDefinition[];
+  constraints?: ConstraintDefinition[];
   comment?: string;
   clusterBy?: string[];
 }
@@ -24,6 +36,7 @@ export interface ViewDefinition {
   name: string;
   schema?: string;
   database?: string;
+  columns?: ViewColumn[];
   query: string;
   comment?: string;
   secure?: boolean;
@@ -43,6 +56,7 @@ export interface ProcedureDefinition {
   body: string;
   comment?: string;
   language?: string;
+  executeAs?: string;
 }
 
 export type DDLObject = TableDefinition | ViewDefinition | ProcedureDefinition;
@@ -353,6 +367,7 @@ export class SnowflakeDDLParser {
       
       const columnsText = columnsMatch[1];
       const columns = this.parseColumns(columnsText);
+      const constraints = this.parseConstraints(columnsText);
       
       // Extract comment
       const commentMatch = cleanedStatement.match(/COMMENT\s*=\s*'([^']*)'/i);
@@ -369,6 +384,7 @@ export class SnowflakeDDLParser {
         schema,
         database,
         columns,
+        constraints,
         comment,
         clusterBy
       };
@@ -380,31 +396,49 @@ export class SnowflakeDDLParser {
   
   private parseCreateView(statement: string): ViewDefinition | null {
     try {
-      // Clean the statement first
+      // Clean the statement first for parsing structure
       const cleanedStatement = this.removeComments(statement);
       
       // Check for OR REPLACE and SECURE keywords
       const orReplace = /CREATE\s+OR\s+REPLACE\s+(?:SECURE\s+)?VIEW/i.test(cleanedStatement);
       const isSecure = /CREATE\s+(?:OR\s+REPLACE\s+)?SECURE\s+VIEW/i.test(cleanedStatement);
 
-      // Extract view name
-      const viewMatch = cleanedStatement.match(/CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?VIEW\s+([^\s(]+)/i);
+      // Extract view name and optional column list
+      const viewMatch = cleanedStatement.match(/CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?VIEW\s+([^\s(]+)(?:\s*\(([^)]+)\))?/i);
       if (!viewMatch) {
         return null;
       }
 
       const fullName = this.cleanIdentifier(viewMatch[1]);
       const { database, schema, name } = this.parseFullyQualifiedName(fullName);
+      
+      // Extract column definitions if present
+      let columns: Array<{ name: string }> | undefined;
+      if (viewMatch[2]) {
+        // Parse column names from the column list
+        const columnNames = viewMatch[2]
+          .split(',')
+          .map(col => col.trim())
+          .filter(col => col.length > 0)
+          .map(col => ({ name: col }));
+        if (columnNames.length > 0) {
+          columns = columnNames;
+        }
+      }
 
-      // Extract query (everything after AS)
-      const asMatch = cleanedStatement.match(/\s+AS\s+([\s\S]+)/i);
+      // Extract query (everything after AS) from original statement to preserve comments
+      const asMatch = statement.match(/\s+AS\s+([\s\S]+)/i);
       if (!asMatch) {
         return null;
       }
 
-      const query = asMatch[1].trim();
+      let query = asMatch[1].trim();
+      // Add semicolon at the end for views (removed by splitStatements)
+      if (!query.endsWith(';')) {
+        query += ';';
+      }
 
-      // Extract comment
+      // Extract comment from cleaned statement
       const commentMatch = cleanedStatement.match(/COMMENT\s*=\s*'([^']*)'/i);
       const comment = commentMatch ? commentMatch[1] : undefined;
 
@@ -412,6 +446,7 @@ export class SnowflakeDDLParser {
         name,
         schema,
         database,
+        columns,
         query,
         comment,
         secure: isSecure,
@@ -428,38 +463,119 @@ export class SnowflakeDDLParser {
       // Clean the statement first
       const cleanedStatement = this.removeComments(statement);
       
-      // Extract procedure name and parameters
-      const procMatch = cleanedStatement.match(/CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\s+([^\s(]+)\s*\(([^)]*)\)/i);
-      if (!procMatch) {
+      // Extract procedure name and parameters - need to handle nested parentheses
+      const procHeaderMatch = cleanedStatement.match(/CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\s+([^\s(]+)\s*\(/i);
+      if (!procHeaderMatch) {
         return null;
       }
       
-      const fullName = this.cleanIdentifier(procMatch[1]);
+      const fullName = this.cleanIdentifier(procHeaderMatch[1]);
       const { database, schema, name } = this.parseFullyQualifiedName(fullName);
-      const parametersText = procMatch[2];
       
+      // Find the parameter list by counting parentheses
+      const paramStartIndex = procHeaderMatch.index! + procHeaderMatch[0].length;
+      let parenCount = 1;
+      let paramEndIndex = paramStartIndex;
+      
+      while (paramEndIndex < cleanedStatement.length && parenCount > 0) {
+        const char = cleanedStatement[paramEndIndex];
+        if (char === '(') {
+          parenCount++;
+        }
+        if (char === ')') {
+          parenCount--;
+        }
+        if (parenCount === 0) {
+          break;
+        }
+        paramEndIndex++;
+      }
+      
+      const parametersText = cleanedStatement.substring(paramStartIndex, paramEndIndex);
       const parameters = this.parseParameters(parametersText);
       
       // Extract return type
       const returnMatch = cleanedStatement.match(/RETURNS\s+([^\s]+)/i);
-      const returnType = returnMatch ? returnMatch[1] : undefined;
+      let returnType = returnMatch ? returnMatch[1] : undefined;
+      // Don't simplify return type data types - keep full specification
       
       // Extract language
       const languageMatch = cleanedStatement.match(/LANGUAGE\s+(\w+)/i);
       const language = languageMatch ? languageMatch[1] : 'SQL';
       
-      // Extract body (everything after AS)
-      const asMatch = cleanedStatement.match(/\s+AS\s+([\s\S]+)/i);
-      if (!asMatch) {
+      // Extract body (everything after the last AS keyword, not the one in "EXECUTE AS OWNER")
+      // Handle: AS [OWNER|CALLER] 'body' or AS 'body' or AS body
+      // Find AS keyword that comes after EXECUTE AS (if present)
+      let body = '';
+      let searchStart = 0;
+      
+      // If there's EXECUTE AS, start searching after it
+      const executeAsMatch = cleanedStatement.match(/EXECUTE\s+AS\s+(?:OWNER|CALLER)/i);
+      if (executeAsMatch && executeAsMatch.index !== undefined) {
+        searchStart = executeAsMatch.index + executeAsMatch[0].length;
+      }
+      
+      const asIndex = cleanedStatement.substring(searchStart).search(/\s+AS\s+/i);
+      if (asIndex === -1) {
         return null;
       }
       
-      let body = asMatch[1].trim();
+      const actualAsIndex = searchStart + asIndex;
       
-      // Remove trailing semicolon if present
-      if (body.endsWith(';')) {
-        body = body.slice(0, -1).trim();
+      // Find the start of the body after AS keyword
+      const afterAs = cleanedStatement.substring(actualAsIndex).match(/\s+AS\s+/i);
+      if (!afterAs) {
+        return null;
       }
+      
+      const bodyStart = actualAsIndex + afterAs[0].length;
+      let bodyContent = cleanedStatement.substring(bodyStart);
+      
+      // Don't trim yet - we want to preserve leading/trailing whitespace for formatting
+      // Remove surrounding quotes if present (handles 'body content')
+      // The body might be: 'content' or just content
+      let startQuote = '';
+      let endQuote = '';
+      
+      // Trim only to check for quotes
+      const trimmedCheck = bodyContent.trim();
+      
+      if (trimmedCheck.startsWith("'")) {
+        // Find the opening and closing quotes
+        const firstQuote = bodyContent.indexOf("'");
+        const lastQuote = bodyContent.lastIndexOf("'");
+        if (lastQuote > firstQuote) {
+          // Extract content between quotes
+          bodyContent = bodyContent.substring(firstQuote + 1, lastQuote);
+        } else {
+          // No closing quote, just remove opening
+          bodyContent = bodyContent.substring(firstQuote + 1);
+        }
+      } else if (trimmedCheck.startsWith('"')) {
+        const firstQuote = bodyContent.indexOf('"');
+        const lastQuote = bodyContent.lastIndexOf('"');
+        if (lastQuote > firstQuote) {
+          bodyContent = bodyContent.substring(firstQuote + 1, lastQuote);
+        } else {
+          bodyContent = bodyContent.substring(firstQuote + 1);
+        }
+      } else if (trimmedCheck.startsWith('/')) {
+        const firstSlash = bodyContent.indexOf('/');
+        const lastSlash = bodyContent.lastIndexOf('/');
+        if (lastSlash > firstSlash) {
+          bodyContent = bodyContent.substring(firstSlash + 1, lastSlash);
+        } else {
+          bodyContent = bodyContent.substring(firstSlash + 1);
+        }
+      }
+      
+      // Don't remove trailing semicolons - they're part of the JavaScript code
+      
+      body = bodyContent;
+      
+      // Extract execute as
+      const executeAsMatch2 = cleanedStatement.match(/EXECUTE\s+AS\s+(OWNER|CALLER)/i);
+      const executeAs = executeAsMatch2 ? executeAsMatch2[1] : undefined;
       
       // Extract comment
       const commentMatch = cleanedStatement.match(/COMMENT\s*=\s*'([^']*)'/i);
@@ -473,7 +589,8 @@ export class SnowflakeDDLParser {
         returnType,
         body,
         comment,
-        language
+        language,
+        executeAs
       };
     } catch (error) {
       console.error('Error parsing CREATE PROCEDURE:', error);
@@ -545,6 +662,10 @@ export class SnowflakeDDLParser {
                 defaultValue += ' ' + parts[i];
               }
             }
+            // Convert SQL's escaped quotes ('') to single quotes (')
+            if (defaultValue.includes("'")) {
+              defaultValue = defaultValue.replace(/''/g, "'");
+            }
             i++;
           }
         } else if (part === 'COMMENT') {
@@ -564,6 +685,8 @@ export class SnowflakeDDLParser {
                 comment = comment.slice(0, -1);
               }
             }
+            // Convert SQL's escaped quotes ('') to single quotes (')
+            comment = comment.replace(/''/g, "'");
             i++;
           }
         } else {
@@ -583,6 +706,40 @@ export class SnowflakeDDLParser {
       return null;
     }
   }
+
+  private parseConstraints(columnsText: string): ConstraintDefinition[] {
+    const constraints: ConstraintDefinition[] = [];
+    
+    // Split by comma but respecting parentheses (for multi-column constraints)
+    const lines = this.splitByComma(columnsText);
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      
+      // Match CONSTRAINT name TYPE (columns) [properties]
+      const constraintMatch = trimmed.match(/^CONSTRAINT\s+([^\s]+)\s+(PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE|CHECK)\s*\(([^)]+)\)(.*)/i);
+      if (constraintMatch) {
+        const [, name, type, columnsStr, properties] = constraintMatch;
+        const columns = columnsStr.split(',').map(col => this.cleanIdentifier(col.trim()));
+        const typeStr = type.toUpperCase();
+        
+        // Parse properties like RELY, DEFERRABLE, ENABLE
+        const props: Record<string, any> = {};
+        props.rely = /RELY/i.test(properties) ? true : false;
+        props.deferrable = /DEFERRABLE/i.test(properties) ? true : false;
+        props.enable = /ENABLE/i.test(properties) ? true : false;
+        
+        constraints.push({
+          name: this.cleanIdentifier(name),
+          type: typeStr,
+          columns,
+          properties: props
+        });
+      }
+    }
+    
+    return constraints;
+  }
   
   private parseParameters(parametersText: string): Array<{name: string; type: string; defaultValue?: string}> {
     if (!parametersText.trim()) {
@@ -593,18 +750,63 @@ export class SnowflakeDDLParser {
     const paramParts = this.splitByComma(parametersText);
     
     for (const part of paramParts) {
-      const trimmed = part.trim();
+      let trimmed = part.trim();
       if (!trimmed) {
         continue;
       }
       
-      // Parse: param_name data_type [DEFAULT value]
-      const match = trimmed.match(/^(\w+)\s+([^\s]+)(?:\s+DEFAULT\s+(.+))?/i);
-      if (match) {
+      // Parse: ["']param_name["'] data_type[(size)] [DEFAULT value]
+      // Step 1: Extract parameter name (possibly quoted)
+      let paramName = '';
+      if (trimmed.startsWith('"') || trimmed.startsWith("'")) {
+        const quoteChar = trimmed[0];
+        const closeQuoteIndex = trimmed.indexOf(quoteChar, 1);
+        if (closeQuoteIndex > 0) {
+          paramName = trimmed.substring(1, closeQuoteIndex);
+          trimmed = trimmed.substring(closeQuoteIndex + 1).trim();
+        } else {
+          // No closing quote, extract until space
+          const spaceIndex = trimmed.indexOf(' ');
+          if (spaceIndex > 0) {
+            paramName = trimmed.substring(1, spaceIndex).replace(/['"]$/, '');
+            trimmed = trimmed.substring(spaceIndex).trim();
+          }
+        }
+      } else {
+        // Unquoted name
+        const spaceIndex = trimmed.indexOf(' ');
+        if (spaceIndex > 0) {
+          paramName = trimmed.substring(0, spaceIndex);
+          trimmed = trimmed.substring(spaceIndex).trim();
+        } else {
+          continue; // No type, skip
+        }
+      }
+      
+      // Step 2: Extract type and default value from remaining string
+      // Type comes first, then optional DEFAULT
+      // Handle cases: "TYPE", "TYPE DEFAULT value", "TYPE(size)", "TYPE(size) DEFAULT value"
+      const defaultIndex = trimmed.toUpperCase().indexOf('DEFAULT');
+      let paramType = '';
+      let defaultValue: string | undefined;
+      
+      if (defaultIndex > 0) {
+        // Has DEFAULT keyword
+        paramType = trimmed.substring(0, defaultIndex).trim();
+        defaultValue = trimmed.substring(defaultIndex + 7).trim(); // 7 = length of "DEFAULT"
+      } else {
+        // No DEFAULT, entire remaining string is the type
+        paramType = trimmed;
+      }
+      
+      if (paramType) {
+        // Simplify VARCHAR(16777216) to VARCHAR, but keep other sizes
+        const simplifiedType = paramType.replace(/VARCHAR\s*\(\s*16777216\s*\)/i, 'VARCHAR');
+        
         parameters.push({
-          name: match[1],
-          type: match[2],
-          defaultValue: match[3]
+          name: paramName,
+          type: simplifiedType,
+          defaultValue
         });
       }
     }
